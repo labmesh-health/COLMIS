@@ -6,6 +6,7 @@ from datetime import datetime
 from io import BytesIO
 import altair as alt
 
+# Styling for containers
 STYLE = """
 <style>
 .rounded-box {
@@ -17,7 +18,6 @@ STYLE = """
 }
 </style>
 """
-
 st.set_page_config(page_title="LAB MIS Dashboard", layout="wide")
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -32,7 +32,7 @@ def extract_date_from_text(text):
                 continue
     return None
 
-def parse_table(pdf_bytes, headers, pattern):
+def parse_table(pdf_bytes, headers, pattern, is_test_counter=False):
     rows = []
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         for page_num, page in enumerate(pdf.pages):
@@ -48,28 +48,33 @@ def parse_table(pdf_bytes, headers, pattern):
                         data_line = data_line.strip()
                         if not data_line or data_line.lower().startswith(("total", "unit:", "system:")):
                             break
-                        row_vals = re.split(r"\s+", data_line)
-                        if len(row_vals) >= len(headers):
-                            row_vals = row_vals[:len(headers)]
+                        if is_test_counter:
+                            # Robust pattern: capture test name (can include spaces), and then numeric columns
+                            match = re.match(r'^(.*?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$', data_line)
+                            if match:
+                                row_vals = list(match.groups())
+                            else:
+                                continue  # skip if pattern doesn't match
+                        else:
+                            row_vals = re.split(r"\s+", data_line)
+                        if len(row_vals) == len(headers):
                             row_dict = dict(zip(headers, row_vals))
                             if "Unit" in row_dict:
                                 current_unit = row_dict["Unit"]
                             row_dict["Unit"] = current_unit
-                            row_dict["Page"] = page_num + 1
                             row_dict["Date"] = date
                             rows.append(row_dict)
-
     df = pd.DataFrame(rows)
     if not df.empty:
         for col in df.columns:
-            if col not in ["Unit", "Date"]:
+            if col not in ["Unit", "Date", "Test"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
 
 def parse_test_counter(pdf_bytes):
     headers = ["Test", "ACN", "Routine", "Rerun", "STAT", "Calibrator", "QC", "Total Count"]
     pattern = r"Test\s+ACN\s+Routine\s+Rerun\s+STAT\s+Calibrator\s+QC\s+Total\s+Count"
-    return parse_table(pdf_bytes, headers, pattern)
+    return parse_table(pdf_bytes, headers, pattern, is_test_counter=True)
 
 def parse_sample_counter(pdf_bytes):
     headers = ["Unit", "Routine", "Rerun", "STAT", "Total Count"]
@@ -84,7 +89,6 @@ def parse_mc_counter(pdf_bytes):
 st.title("LAB MIS Instrument Counters")
 
 uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
-
 test_df = sample_df = mc_df = pd.DataFrame()
 if uploaded_file:
     pdf_bytes = uploaded_file.read()
@@ -95,7 +99,6 @@ if uploaded_file:
     with st.spinner("Extracting MC Counter..."):
         mc_df = parse_mc_counter(pdf_bytes)
 
-# Always default filters to "All"
 def setup_filters(df, name):
     if df.empty or "Date" not in df.columns or df["Date"].isnull().all():
         st.sidebar.warning(f"No Date data in {name}")
@@ -138,16 +141,22 @@ filtered_test = apply_filters(test_df, test_date_range, test_unit)
 filtered_sample = apply_filters(sample_df, sample_date_range, sample_unit)
 filtered_mc = apply_filters(mc_df, mc_date_range, mc_unit)
 
+# Only show needed columns (date not shown, test name shown for test counter)
 tabs = st.tabs(["Test Counter", "Sample Counter", "MC Counter", "Download"])
 
 with tabs[0]:
     st.header("Test Counter Data")
-    if not filtered_test.empty:
+    columns_to_show = ["Unit", "Test", "Routine", "Rerun", "STAT", "Calibrator", "QC", "Total Count"]
+    final_test_df = filtered_test[columns_to_show] if not filtered_test.empty else pd.DataFrame()
+    if not final_test_df.empty:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
-            st.dataframe(filtered_test)
+            st.dataframe(final_test_df)
             chart = alt.Chart(filtered_test).mark_line(point=True).encode(
-                "Date:T", "Total Count:Q", color="Unit:N", tooltip=["Unit", "Date", "Total Count"]
+                x="Test:N",
+                y="Total Count:Q",
+                color="Unit:N",
+                tooltip=["Unit", "Test", "Total Count"]
             ).interactive()
             st.altair_chart(chart, use_container_width=True)
             st.markdown(
@@ -160,46 +169,48 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("Sample Counter Data")
-    if not filtered_sample.empty:
+    columns_to_show = ["Unit", "Routine", "Rerun", "STAT", "Total Count"]
+    final_sample_df = filtered_sample[columns_to_show] if not filtered_sample.empty else pd.DataFrame()
+    if not final_sample_df.empty:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
-            st.dataframe(filtered_sample)
-            if "Routine" in filtered_sample.columns:
-                chart = alt.Chart(filtered_sample).mark_bar().encode(
-                    x="Unit:N", y="Routine:Q", color="Unit:N", tooltip=["Unit", "Routine"]
+            st.dataframe(final_sample_df)
+            if "Routine" in final_sample_df.columns:
+                chart = alt.Chart(final_sample_df).mark_bar().encode(
+                    x="Unit:N",
+                    y="Routine:Q",
+                    color="Unit:N",
+                    tooltip=["Unit", "Routine"]
                 )
                 st.altair_chart(chart, use_container_width=True)
-            st.markdown(
-                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
-                unsafe_allow_html=True
-            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No Sample Counter data to display.")
 
 with tabs[2]:
     st.header("Measuring Cells Counter Data")
-    if not filtered_mc.empty:
+    columns_to_show = ["Unit", "MC Serial No.", "Last Reset", "Count after Reset", "Total Count"]
+    final_mc_df = filtered_mc[columns_to_show] if not filtered_mc.empty else pd.DataFrame()
+    if not final_mc_df.empty:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
-            st.dataframe(filtered_mc)
-            chart = alt.Chart(filtered_mc).mark_line(point=True).encode(
-                "Date:T", "Total Count:Q", color="Unit:N", tooltip=["Unit", "Date", "Total Count"]
+            st.dataframe(final_mc_df)
+            chart = alt.Chart(final_mc_df).mark_line(point=True).encode(
+                x="MC Serial No.:N",
+                y="Total Count:Q",
+                color="Unit:N",
+                tooltip=["Unit", "MC Serial No.", "Total Count"]
             ).interactive()
             st.altair_chart(chart, use_container_width=True)
-            st.markdown(
-                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
-                unsafe_allow_html=True
-            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No Measuring Cells counter data to display.")
 
 with tabs[3]:
     st.header("Download Data")
-    if not test_df.empty:
-        st.download_button("Download Test CSV", test_df.to_csv(index=False), "test_counter.csv")
-    if not sample_df.empty:
-        st.download_button("Download Sample CSV", sample_df.to_csv(index=False), "sample_counter.csv")
-    if not mc_df.empty:
-        st.download_button("Download MC CSV", mc_df.to_csv(index=False), "mc_counter.csv")
+    if not final_test_df.empty:
+        st.download_button("Download Test CSV", final_test_df.to_csv(index=False), "test_counter.csv")
+    if not final_sample_df.empty:
+        st.download_button("Download Sample CSV", final_sample_df.to_csv(index=False), "sample_counter.csv")
+    if not final_mc_df.empty:
+        st.download_button("Download MC CSV", final_mc_df.to_csv(index=False), "mc_counter.csv")
