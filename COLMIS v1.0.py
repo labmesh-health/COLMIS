@@ -6,7 +6,6 @@ from datetime import datetime
 from io import BytesIO
 import altair as alt
 
-# Styling for containers
 STYLE = """
 <style>
 .rounded-box {
@@ -49,12 +48,11 @@ def parse_table(pdf_bytes, headers, pattern, is_test_counter=False):
                         if not data_line or data_line.lower().startswith(("total", "unit:", "system:")):
                             break
                         if is_test_counter:
-                            # Robust pattern: capture test name (can include spaces), and then numeric columns
                             match = re.match(r'^(.*?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$', data_line)
                             if match:
                                 row_vals = list(match.groups())
                             else:
-                                continue  # skip if pattern doesn't match
+                                continue
                         else:
                             row_vals = re.split(r"\s+", data_line)
                         if len(row_vals) == len(headers):
@@ -90,6 +88,7 @@ st.title("LAB MIS Instrument Counters")
 
 uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
 test_df = sample_df = mc_df = pd.DataFrame()
+
 if uploaded_file:
     pdf_bytes = uploaded_file.read()
     with st.spinner("Extracting Test Counter..."):
@@ -106,20 +105,10 @@ def setup_filters(df, name):
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
     min_date = df["Date"].min()
     max_date = df["Date"].max()
-    date_range = st.sidebar.date_input(
-        f"{name} Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
+    date_range = st.sidebar.date_input(f"{name} Date Range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
     all_units = sorted(df["Unit"].dropna().unique())
     options = ["All"] + all_units
-    selected_unit = st.sidebar.selectbox(
-        f"{name} Unit",
-        options=options,
-        index=0,
-        key=f"{name.replace(' ', '_')}_unit"
-    )
+    selected_unit = st.sidebar.selectbox(f"{name} Unit", options=options, index=0, key=f"{name.replace(' ', '_')}_unit")
     return date_range, selected_unit
 
 test_date_range, test_unit = setup_filters(test_df, "Test Counter") if not test_df.empty else (None, "All")
@@ -141,8 +130,7 @@ filtered_test = apply_filters(test_df, test_date_range, test_unit)
 filtered_sample = apply_filters(sample_df, sample_date_range, sample_unit)
 filtered_mc = apply_filters(mc_df, mc_date_range, mc_unit)
 
-# Only show needed columns (date not shown, test name shown for test counter)
-tabs = st.tabs(["Test Counter", "Sample Counter", "MC Counter", "Download"])
+tabs = st.tabs(["Test Counter", "Sample Counter", "Measuring Cells Counter", "Download"])
 
 with tabs[0]:
     st.header("Test Counter Data")
@@ -152,13 +140,14 @@ with tabs[0]:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
             st.dataframe(final_test_df)
-            chart = alt.Chart(filtered_test).mark_line(point=True).encode(
+            base = alt.Chart(final_test_df).mark_line(point=True).encode(
                 x="Test:N",
                 y="Total Count:Q",
                 color="Unit:N",
                 tooltip=["Unit", "Test", "Total Count"]
-            ).interactive()
-            st.altair_chart(chart, use_container_width=True)
+            )
+            text = base.mark_text(align='center', baseline='bottom', dy=-5).encode(text='Total Count:Q')
+            st.altair_chart(base + text, use_container_width=True)
             st.markdown(
                 '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
                 unsafe_allow_html=True
@@ -175,14 +164,14 @@ with tabs[1]:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
             st.dataframe(final_sample_df)
-            if "Routine" in final_sample_df.columns:
-                chart = alt.Chart(final_sample_df).mark_bar().encode(
-                    x="Unit:N",
-                    y="Routine:Q",
-                    color="Unit:N",
-                    tooltip=["Unit", "Routine"]
-                )
-                st.altair_chart(chart, use_container_width=True)
+            base = alt.Chart(final_sample_df).mark_bar().encode(
+                x="Unit:N",
+                y="Routine:Q",
+                color="Unit:N",
+                tooltip=["Unit", "Routine"]
+            )
+            text = base.mark_text(dy=-5, color='black').encode(text='Routine:Q')
+            st.altair_chart(base + text, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No Sample Counter data to display.")
@@ -195,13 +184,14 @@ with tabs[2]:
         with st.container():
             st.markdown('<div class="rounded-box">', unsafe_allow_html=True)
             st.dataframe(final_mc_df)
-            chart = alt.Chart(final_mc_df).mark_line(point=True).encode(
+            base = alt.Chart(final_mc_df).mark_line(point=True).encode(
                 x="MC Serial No.:N",
                 y="Total Count:Q",
                 color="Unit:N",
                 tooltip=["Unit", "MC Serial No.", "Total Count"]
-            ).interactive()
-            st.altair_chart(chart, use_container_width=True)
+            )
+            text = base.mark_text(align='center', baseline='bottom', dy=-5).encode(text='Total Count:Q')
+            st.altair_chart(base + text, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No Measuring Cells counter data to display.")
