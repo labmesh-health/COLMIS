@@ -6,7 +6,6 @@ from datetime import datetime
 from io import BytesIO
 import altair as alt
 
-# CSS for styling containers
 STYLE = """
 <style>
 .rounded-box {
@@ -22,7 +21,6 @@ STYLE = """
 st.set_page_config(page_title="LAB MIS Dashboard", layout="wide")
 st.markdown(STYLE, unsafe_allow_html=True)
 
-# Data extraction functions
 def extract_date_from_text(text):
     for line in text.split('\n')[:6]:
         match = re.search(r'(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})', line)
@@ -68,7 +66,6 @@ def parse_table(pdf_bytes, headers, pattern):
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
 
-# Parsers for counters
 def parse_test_counter(pdf_bytes):
     headers = ["Test", "ACN", "Routine", "Rerun", "STAT", "Calibrator", "QC", "Total Count"]
     pattern = r"Test\s+ACN\s+Routine\s+Rerun\s+STAT\s+Calibrator\s+QC\s+Total\s+Count"
@@ -84,10 +81,8 @@ def parse_mc_counter(pdf_bytes):
     pattern = r"Unit[:]*\s*MC Serial No\.\s+Last Reset\s+Count after Reset\s+Total Count"
     return parse_table(pdf_bytes, headers, pattern)
 
-# Dashboard title
 st.title("LAB MIS Instrument Counters")
 
-# Upload PDF
 uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
 
 test_df = sample_df = mc_df = pd.DataFrame()
@@ -100,11 +95,11 @@ if uploaded_file:
     with st.spinner("Extracting MC Counter..."):
         mc_df = parse_mc_counter(pdf_bytes)
 
-# Function for setting up filters
+# Always default filters to "All"
 def setup_filters(df, name):
     if df.empty or "Date" not in df.columns or df["Date"].isnull().all():
         st.sidebar.warning(f"No Date data in {name}")
-        return None, ["All"]
+        return None, "All"
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
     min_date = df["Date"].min()
     max_date = df["Date"].max()
@@ -114,18 +109,20 @@ def setup_filters(df, name):
         min_value=min_date,
         max_value=max_date
     )
-    # Default selection is all units
     all_units = sorted(df["Unit"].dropna().unique())
     options = ["All"] + all_units
-    selected_unit = st.sidebar.selectbox(f"{name} Unit", options=options, index=0)
+    selected_unit = st.sidebar.selectbox(
+        f"{name} Unit",
+        options=options,
+        index=0,
+        key=f"{name.replace(' ', '_')}_unit"
+    )
     return date_range, selected_unit
 
-# Setup filters
 test_date_range, test_unit = setup_filters(test_df, "Test Counter") if not test_df.empty else (None, "All")
 sample_date_range, sample_unit = setup_filters(sample_df, "Sample Counter") if not sample_df.empty else (None, "All")
 mc_date_range, mc_unit = setup_filters(mc_df, "Measuring Cells") if not mc_df.empty else (None, "All")
 
-# Filtering data
 def apply_filters(df, date_range, unit):
     if df.empty:
         return df
@@ -141,10 +138,8 @@ filtered_test = apply_filters(test_df, test_date_range, test_unit)
 filtered_sample = apply_filters(sample_df, sample_date_range, sample_unit)
 filtered_mc = apply_filters(mc_df, mc_date_range, mc_unit)
 
-# Tabs for data views
 tabs = st.tabs(["Test Counter", "Sample Counter", "MC Counter", "Download"])
 
-# Test Counter Tab
 with tabs[0]:
     st.header("Test Counter Data")
     if not filtered_test.empty:
@@ -155,11 +150,14 @@ with tabs[0]:
                 "Date:T", "Total Count:Q", color="Unit:N", tooltip=["Unit", "Date", "Total Count"]
             ).interactive()
             st.altair_chart(chart, use_container_width=True)
+            st.markdown(
+                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
+                unsafe_allow_html=True
+            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("No data.")
+        st.info("No Test Counter data to display.")
 
-# Sample Counter Tab
 with tabs[1]:
     st.header("Sample Counter Data")
     if not filtered_sample.empty:
@@ -171,11 +169,14 @@ with tabs[1]:
                     x="Unit:N", y="Routine:Q", color="Unit:N", tooltip=["Unit", "Routine"]
                 )
                 st.altair_chart(chart, use_container_width=True)
+            st.markdown(
+                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
+                unsafe_allow_html=True
+            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("No data.")
+        st.info("No Sample Counter data to display.")
 
-# MC Counter Tab
 with tabs[2]:
     st.header("Measuring Cells Counter Data")
     if not filtered_mc.empty:
@@ -186,11 +187,14 @@ with tabs[2]:
                 "Date:T", "Total Count:Q", color="Unit:N", tooltip=["Unit", "Date", "Total Count"]
             ).interactive()
             st.altair_chart(chart, use_container_width=True)
+            st.markdown(
+                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
+                unsafe_allow_html=True
+            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("No data.")
+        st.info("No Measuring Cells counter data to display.")
 
-# Download Tab
 with tabs[3]:
     st.header("Download Data")
     if not test_df.empty:
