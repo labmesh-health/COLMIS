@@ -60,53 +60,66 @@ def parse_testcounter(pdf_bytes):
 
 st.title("LAB MIS Test Counter Dashboard")
 
-uploaded_file = st.file_uploader("Upload your PDF report", type=["pdf"])
+# Sidebar: Upload and filters
+uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
 
+df = pd.DataFrame()
 if uploaded_file:
-    with st.spinner("Extracting data from PDF..."):
+    with st.spinner("Extracting data..."):
         pdf_bytes = uploaded_file.read()
         df = parse_testcounter(pdf_bytes)
-        if df.empty:
-            st.warning("No Test Counter data found in the uploaded PDF.")
-        else:
-            st.success("Extraction successful!")
-            
-            df['Date'] = pd.to_datetime(df['Date']).dt.date
-            
-            # Sidebar filters
-            min_date = df['Date'].min()
-            max_date = df['Date'].max()
-            date_range = st.sidebar.slider(
-                "Select date range",
-                min_value=min_date,
-                max_value=max_date,
-                value=(min_date, max_date)
-            )
-            
-            units = df['Unit'].unique().tolist()
-            selected_units = st.sidebar.multiselect("Select Units", options=units, default=units)
-            
-            # Filter dataframe
-            filtered_df = df[(df['Date'] >= date_range[0]) & (df['Date'] <= date_range[1]) & (df['Unit'].isin(selected_units))]
-            
-            st.subheader("Filtered Test Counter Data")
-            st.dataframe(filtered_df)
-            
-            # Visualization: Total Count over time by Unit
-            if not filtered_df.empty:
-                chart = alt.Chart(filtered_df).mark_line(point=True).encode(
-                    x='Date:T',
-                    y='Total Count:Q',
-                    color='Unit:N',
-                    tooltip=['Unit', 'Date', 'Total Count']
-                ).interactive()
-                st.altair_chart(chart, use_container_width=True)
-            
-            # Download option
-            to_download = filtered_df.to_excel(index=False)
-            st.download_button(
-                label="Download Filtered Data as Excel",
-                data=to_download,
-                file_name="filtered_test_counter_data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+
+if not df.empty:
+    df['Date'] = pd.to_datetime(df['Date']).dt.date
+else:
+    st.sidebar.warning("No data loaded yet.")
+
+# Sidebar filters
+if not df.empty and 'Date' in df.columns and df['Date'].notnull().any():
+    min_date = df['Date'].min()
+    max_date = df['Date'].max()
+    date_range = st.sidebar.slider(
+        "Select date range",
+        min_value=min_date,
+        max_value=max_date,
+        value=(min_date, max_date)
+    )
+else:
+    date_range = None
+
+all_units = sorted(df['Unit'].dropna().unique()) if not df.empty else []
+selected_units = st.sidebar.multiselect("Select Unit(s)", options=all_units, default=all_units)
+
+# Filter dataframe for main area
+if not df.empty:
+    filtered_df = df
+    if date_range:
+        filtered_df = filtered_df[(filtered_df['Date'] >= date_range[0]) & (filtered_df['Date'] <= date_range[1])]
+    if selected_units:
+        filtered_df = filtered_df[filtered_df['Unit'].isin(selected_units)]
+else:
+    filtered_df = pd.DataFrame()
+
+# Main area
+st.subheader("Filtered Test Counter Data")
+if not filtered_df.empty:
+    st.dataframe(filtered_df)
+
+    # Altair line chart for Total Count over time per unit
+    chart = alt.Chart(filtered_df).mark_line(point=True).encode(
+        x='Date:T',
+        y='Total Count:Q',
+        color='Unit:N',
+        tooltip=['Unit', 'Date', 'Total Count']
+    ).interactive()
+    st.altair_chart(chart, use_container_width=True)
+
+    # Download filtered data as Excel
+    excel_bytes = BytesIO()
+    filtered_df.to_excel(excel_bytes, index=False)
+    st.download_button("Download Filtered Data as Excel",
+                       excel_bytes.getvalue(),
+                       "filtered_testcounter.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+else:
+    st.info("No data to display. Please upload a PDF and adjust filters.")
