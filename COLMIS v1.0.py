@@ -60,7 +60,6 @@ def parse_testcounter(pdf_bytes):
 
 st.title("LAB MIS Test Counter Dashboard")
 
-# Sidebar: Upload and filters
 uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
 
 df = pd.DataFrame()
@@ -71,26 +70,31 @@ if uploaded_file:
 
 if not df.empty:
     df['Date'] = pd.to_datetime(df['Date']).dt.date
-else:
-    st.sidebar.warning("No data loaded yet.")
 
-# Sidebar filters
 if not df.empty and 'Date' in df.columns and df['Date'].notnull().any():
     min_date = df['Date'].min()
     max_date = df['Date'].max()
-    date_range = st.sidebar.slider(
-        "Select date range",
-        min_value=min_date,
-        max_value=max_date,
-        value=(min_date, max_date)
-    )
+    if isinstance(min_date, pd.Timestamp):
+        min_date = min_date.date()
+    if isinstance(max_date, pd.Timestamp):
+        max_date = max_date.date()
+    if min_date <= max_date:
+        date_range = st.sidebar.slider(
+            "Select date range",
+            min_value=min_date,
+            max_value=max_date,
+            value=(min_date, max_date)
+        )
+    else:
+        st.sidebar.warning("Invalid date range.")
+        date_range = None
 else:
+    st.sidebar.warning("No valid date data found.")
     date_range = None
 
 all_units = sorted(df['Unit'].dropna().unique()) if not df.empty else []
 selected_units = st.sidebar.multiselect("Select Unit(s)", options=all_units, default=all_units)
 
-# Filter dataframe for main area
 if not df.empty:
     filtered_df = df
     if date_range:
@@ -100,12 +104,9 @@ if not df.empty:
 else:
     filtered_df = pd.DataFrame()
 
-# Main area
 st.subheader("Filtered Test Counter Data")
 if not filtered_df.empty:
     st.dataframe(filtered_df)
-
-    # Altair line chart for Total Count over time per unit
     chart = alt.Chart(filtered_df).mark_line(point=True).encode(
         x='Date:T',
         y='Total Count:Q',
@@ -114,7 +115,6 @@ if not filtered_df.empty:
     ).interactive()
     st.altair_chart(chart, use_container_width=True)
 
-    # Download filtered data as Excel
     excel_bytes = BytesIO()
     filtered_df.to_excel(excel_bytes, index=False)
     st.download_button("Download Filtered Data as Excel",
