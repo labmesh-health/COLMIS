@@ -57,15 +57,12 @@ def parse_table(pdf_bytes, headers, pattern, is_test_counter=False):
                             row_vals = re.split(r"\s+", data_line)
                         if len(row_vals) == len(headers):
                             row_dict = dict(zip(headers, row_vals))
-                            if "Unit" in row_dict:
-                                current_unit = row_dict["Unit"]
-                            row_dict["Unit"] = current_unit
                             row_dict["Date"] = date
                             rows.append(row_dict)
     df = pd.DataFrame(rows)
     if not df.empty:
         for col in df.columns:
-            if col not in ["Unit", "Date", "Test"]:
+            if col not in ["Date", "Test"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
 
@@ -106,8 +103,8 @@ def setup_filters(df, name):
     min_date = df["Date"].min()
     max_date = df["Date"].max()
     date_range = st.sidebar.date_input(f"{name} Date Range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-    all_units = sorted(df["Unit"].dropna().unique())
-    options = ["All"] + all_units
+    all_units = sorted(df["Unit"].dropna().unique()) if "Unit" in df.columns else []
+    options = ["All"] + all_units if all_units else ["All"]
     selected_unit = st.sidebar.selectbox(f"{name} Unit", options=options, index=0, key=f"{name.replace(' ', '_')}_unit")
     return date_range, selected_unit
 
@@ -122,7 +119,7 @@ def apply_filters(df, date_range, unit):
     filtered = df
     if start and end:
         filtered = filtered[(filtered["Date"] >= start) & (filtered["Date"] <= end)]
-    if unit and unit != "All":
+    if "Unit" in df.columns and unit and unit != "All":
         filtered = filtered[filtered["Unit"] == unit]
     return filtered
 
@@ -134,7 +131,7 @@ tabs = st.tabs(["Test Counter", "Sample Counter", "Measuring Cells Counter", "Do
 
 with tabs[0]:
     st.header("Test Counter Data")
-    columns_to_show = ["Unit", "Test", "Routine", "Rerun", "STAT", "Calibrator", "QC", "Total Count"]
+    columns_to_show = ["Test", "Routine", "Rerun", "STAT", "Calibrator", "QC", "Total Count"]
     final_test_df = filtered_test[columns_to_show] if not filtered_test.empty else pd.DataFrame()
     if not final_test_df.empty:
         with st.container():
@@ -143,15 +140,11 @@ with tabs[0]:
             base = alt.Chart(final_test_df).mark_line(point=True).encode(
                 x="Test:N",
                 y="Total Count:Q",
-                color="Unit:N",
-                tooltip=["Unit", "Test", "Total Count"]
+                color=alt.value("#1f77b4"),
+                tooltip=["Test", "Total Count"]
             )
             text = base.mark_text(align='center', baseline='bottom', dy=-5).encode(text='Total Count:Q')
             st.altair_chart(base + text, use_container_width=True)
-            st.markdown(
-                '<div style="margin:8px 0 0 0;color:#757575;font-size:0.9em">_Select a unit or date range in the sidebar. Defaults to all._</div>',
-                unsafe_allow_html=True
-            )
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No Test Counter data to display.")
