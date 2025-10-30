@@ -60,6 +60,7 @@ def parse_testcounter(pdf_bytes):
 
 st.title("LAB MIS Test Counter Dashboard")
 
+# Left sidebar controls
 uploaded_file = st.sidebar.file_uploader("Upload your PDF report", type=["pdf"])
 
 df = pd.DataFrame()
@@ -71,6 +72,7 @@ if uploaded_file:
 if not df.empty:
     df['Date'] = pd.to_datetime(df['Date']).dt.date
 
+# Safe date picker in sidebar with validation
 if not df.empty and 'Date' in df.columns and df['Date'].notnull().any():
     min_date = df['Date'].min()
     max_date = df['Date'].max()
@@ -78,48 +80,59 @@ if not df.empty and 'Date' in df.columns and df['Date'].notnull().any():
         min_date = min_date.date()
     if isinstance(max_date, pd.Timestamp):
         max_date = max_date.date()
-    if min_date <= max_date:
-        date_range = st.sidebar.slider(
-            "Select date range",
-            min_value=min_date,
-            max_value=max_date,
-            value=(min_date, max_date)
-        )
-    else:
-        st.sidebar.warning("Invalid date range.")
-        date_range = None
+
+    # st.date_input for date range picker returns tuple
+    date_range = st.sidebar.date_input(
+        "Select date range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
+
+    if not isinstance(date_range, tuple) or len(date_range) != 2:
+        # If user selects single date, convert to tuple
+        date_range = (min_date, max_date)
+
+    start_date, end_date = date_range
 else:
-    st.sidebar.warning("No valid date data found.")
-    date_range = None
+    st.sidebar.warning("No valid dates found for filter.")
+    start_date = end_date = None
 
 all_units = sorted(df['Unit'].dropna().unique()) if not df.empty else []
 selected_units = st.sidebar.multiselect("Select Unit(s)", options=all_units, default=all_units)
 
+# Filter dataframe according to selections
 if not df.empty:
     filtered_df = df
-    if date_range:
-        filtered_df = filtered_df[(filtered_df['Date'] >= date_range[0]) & (filtered_df['Date'] <= date_range[1])]
+    if start_date and end_date:
+        filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
     if selected_units:
         filtered_df = filtered_df[filtered_df['Unit'].isin(selected_units)]
 else:
     filtered_df = pd.DataFrame()
 
+# Main display area
 st.subheader("Filtered Test Counter Data")
+
 if not filtered_df.empty:
     st.dataframe(filtered_df)
+
     chart = alt.Chart(filtered_df).mark_line(point=True).encode(
         x='Date:T',
         y='Total Count:Q',
         color='Unit:N',
         tooltip=['Unit', 'Date', 'Total Count']
     ).interactive()
+
     st.altair_chart(chart, use_container_width=True)
 
     excel_bytes = BytesIO()
     filtered_df.to_excel(excel_bytes, index=False)
-    st.download_button("Download Filtered Data as Excel",
-                       excel_bytes.getvalue(),
-                       "filtered_testcounter.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button(
+        "Download Filtered Data as Excel",
+        excel_bytes.getvalue(),
+        "filtered_testcounter.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 else:
-    st.info("No data to display. Please upload a PDF and adjust filters.")
+    st.info("Upload a PDF and select filter criteria to view data.")
