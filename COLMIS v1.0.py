@@ -12,9 +12,17 @@ SAMPLE_COUNTER_CSV = "sample_counter_data.csv"
 MC_COUNTER_CSV = "mc_counter_data.csv"
 
 def extract_date_from_page_text(text):
-    date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4}) (\d{1,2}:\d{2})', text)
+    """
+    Extract datetime from the end of the first line: DD/MM/YYYY HH:MM with one space in between
+    Handles variable spaces before date.
+    """
+    if not text:
+        return None
+    first_line = text.split('\n')[0]
+    date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})\s*$', first_line)
     if date_match:
-        date_part, time_part = date_match.groups()
+        date_part = date_match.group(1)
+        time_part = date_match.group(2)
         try:
             dt = datetime.strptime(f"{date_part} {time_part}", "%d/%m/%Y %H:%M")
             return dt
@@ -26,7 +34,7 @@ def find_table_by_header(tables, possible_headers):
     for i, t in enumerate(tables):
         header = [col.strip().lower() for col in t[0]]
         for ph in possible_headers:
-            if all(any(h.lower() in c for c in header) for h in ph):
+            if all(any(h.lower() == c for c in header) for h in ph):
                 return i, t
     return None, None
 
@@ -48,26 +56,19 @@ def extract_tables_by_type(pdf_path):
                 df_tc['Date'] = page_date
                 test_rows.append(df_tc)
             # Sample Counter
-            sc_headers = [
-                ['Unit:', 'Routine', 'Rerun', 'STAT', 'Total Count'],
-                ['Unit', 'Routine', 'Rerun', 'STAT', 'Total Count']
-            ]
+            sc_headers = [['Unit', 'Routine', 'Rerun', 'STAT', 'Total Count']]
             i_sc, table_sc = find_table_by_header(tables, sc_headers)
             if i_sc is not None and page_date:
                 df_sc = pd.DataFrame(table_sc[1:], columns=table_sc[0])
                 df_sc['Date'] = page_date
                 sample_rows.append(df_sc)
             # Measuring Cells Counter
-            mc_headers = [
-                ['Unit:', 'MC Serial No.', 'Last Reset', 'Count after Reset', 'Total Count'],
-                ['Unit', 'MC Serial No.', 'Last Reset', 'Count after Reset', 'Total Count']
-            ]
+            mc_headers = [['Unit', 'MC Serial No.', 'Last Reset', 'Count after Reset', 'Total Count']]
             i_mc, table_mc = find_table_by_header(tables, mc_headers)
             if i_mc is not None and page_date:
                 df_mc = pd.DataFrame(table_mc[1:], columns=table_mc[0])
                 df_mc['Date'] = page_date
                 mc_rows.append(df_mc)
-    # Clean up
     test_df = pd.concat(test_rows, ignore_index=True) if test_rows else pd.DataFrame()
     sample_df = pd.concat(sample_rows, ignore_index=True) if sample_rows else pd.DataFrame()
     mc_df = pd.concat(mc_rows, ignore_index=True) if mc_rows else pd.DataFrame()
@@ -82,7 +83,6 @@ def append_and_save(df, file):
     combined.to_csv(file, index=False)
     return combined
 
-# Streamlit UI
 st.set_page_config(page_title="Instrument Dashboard", layout='wide')
 st.title("Instrument Counter Dashboard")
 
@@ -104,7 +104,6 @@ test_counter_df = safe_load(TEST_COUNTER_CSV)
 sample_counter_df = safe_load(SAMPLE_COUNTER_CSV)
 mc_counter_df = safe_load(MC_COUNTER_CSV)
 
-# Process PDF upload and handle errors
 error_flag = False
 error_message = ""
 
@@ -112,7 +111,6 @@ if uploaded_file:
     with open("uploaded_now.pdf", "wb") as f:
         f.write(uploaded_file.getbuffer())
     date_found, tdf, sdf, mdf = extract_tables_by_type("uploaded_now.pdf")
-    # Convert numeric columns sensibly if found
     for df in [tdf, sdf, mdf]:
         for col in df.columns:
             if df[col].dtype == "object":
@@ -159,7 +157,6 @@ tabs = st.tabs(["Graphs", "Tables", "Download Data"])
 if error_flag:
     st.error(error_message)
 else:
-    # --------- TAB 1 - GRAPHS -------------
     with tabs[0]:
         st.header("Instrument Test Counter Visualizations")
         if not test_counter_df.empty and "Date" in test_counter_df.columns and "Unit" in test_counter_df.columns:
@@ -221,7 +218,6 @@ else:
                 x='Unit:N', y='Total Count:Q', color='Unit:N'
             )
             st.altair_chart(box, use_container_width=True)
-    # ------- TAB 2 - TABLES ------------
     with tabs[1]:
         st.header("Data Tables and Interactive Filters")
         st.markdown("*Use table filters above for custom views*")
@@ -237,7 +233,6 @@ else:
             st.subheader("Measuring Cells Counter Table (filtered)")
             df = mc_counter_df[(mc_counter_df["Unit"].isin(selected_units))]
             st.dataframe(df.style.background_gradient(subset=['Total Count'], cmap='magma'), use_container_width=True)
-    # -------- TAB 3 - DOWNLOADS -----------
     with tabs[2]:
         st.header("Download All Data")
         if not test_counter_df.empty:
